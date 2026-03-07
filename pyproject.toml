@@ -1,0 +1,39 @@
+[project]
+name = "collaborative-hypothesis-agent"
+version = "0.1.0"
+description = "Multi-agent system for collaborative scientific hypothesis generation"
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+authors = [
+    { name = "Aswin Kumar", email = "aswinkumarak2005@gmail.com" }
+]
+dependencies = [
+    "pydantic>=2.6.0,<3.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+    "structlog>=24.1.0,<25.0.0",
+    "rich>=13.7.0,<14.0.0",
+    "pytest (>=9.0.2,<10.0.0)",
+    "sentence-transformers>=2.7.0",
+    "faiss-cpu>=1.7.4",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "biopython (>=1.86,<2.0)",
+    "rank-bm25 (>=0.2.2,<0.3.0)",
+    "groq (>=1.0.0,<2.0.0)",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.2,<10.0.0"
+]
+
+[tool.poetry]
+package-mode = true
+
+[[tool.poetry.packages]]
+include = "hypothesis_agent"
+from = "src"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
