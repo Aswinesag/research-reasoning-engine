@@ -2,13 +2,20 @@ import faiss
 import numpy as np
 import json
 import os
-from sentence_transformers import SentenceTransformer
+from functools import lru_cache
 from hypothesis_agent.core.models import EvidenceSnippet
+
+
+@lru_cache(maxsize=1)
+def get_sentence_transformer():
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer("all-MiniLM-L6-v2")
 
 
 class RetrievalService:
     def __init__(self):
-        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        self._model = None
 
         # Get project root (go up from src/hypothesis_agent/app/services)
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
@@ -30,6 +37,12 @@ class RetrievalService:
             raise ValueError(
                 "Mismatch between FAISS index size and metadata entries!"
             )
+
+    @property
+    def model(self):
+        if self._model is None:
+            self._model = get_sentence_transformer()
+        return self._model
 
     def search(self, query: str, top_k: int = 5):
         # Embed query
