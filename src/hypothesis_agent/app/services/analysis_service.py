@@ -35,6 +35,9 @@ def build_fast_analysis(query: str):
     start_time = perf_counter()
     print(f"[analysis] fast_start query={query!r}")
 
+    job = job_store.create(query)
+    job_store.update(job.id, status="processing", progress=10, stage="retrieving evidence")
+
     snippets = retrieval_service.search(query, top_k=3)
     print(f"[analysis] retrieval_complete elapsed={perf_counter() - start_time:.2f}s snippets={len(snippets)}")
 
@@ -44,11 +47,15 @@ def build_fast_analysis(query: str):
         response["job_id"] = None
         return response
 
+    job_store.update(job.id, progress=35, stage="building causal graph")
+
     graph = generator.build_graph(snippets)
     edges = graph.get_edges()
     chains = graph.find_chains(depth=3)
     conflicts = graph.detect_conflicts()
     confidence = generator.compute_confidence(graph, conflicts)
+
+    job_store.update(job.id, progress=70, stage="assembling evidence")
 
     nodes_dict = {}
     for edge in edges:
@@ -97,12 +104,11 @@ def build_fast_analysis(query: str):
     reinforcement_factor = min(len(edges) / 5, 1.0)
     graph_density = len(edges) / max(len(nodes), 1)
 
-    job = job_store.create(query)
-    job_store.update(job.id, status="processing")
-
     return {
         "status": "processing",
         "job_id": job.id,
+        "progress": 70,
+        "stage": "assembling evidence",
         "overview": {
             "total_edges": len(edges),
             "conflicts": len(conflicts),
@@ -134,11 +140,13 @@ def complete_analysis(query: str, job_id: str):
     print(f"[analysis] hypothesis_job_start job_id={job_id} query={query!r}")
 
     try:
+        job_store.update(job_id, status="processing", progress=75, stage="generating hypothesis")
         snippets = retrieval_service.search(query, top_k=3)
         if len(snippets) < 2:
             result = empty_response()
         else:
             graph = generator.build_graph(snippets)
+            job_store.update(job_id, progress=85, stage="evaluating conflicts")
             hypothesis_text, conflicts = generator.generate_from_graph(graph)
             confidence = generator.compute_confidence(graph, conflicts)
             edges = graph.get_edges()
@@ -194,6 +202,8 @@ def complete_analysis(query: str, job_id: str):
             result = {
                 "status": "complete",
                 "job_id": job_id,
+                "progress": 100,
+                "stage": "complete",
                 "overview": {
                     "total_edges": len(edges),
                     "conflicts": len(conflicts),
@@ -224,7 +234,7 @@ def complete_analysis(query: str, job_id: str):
         return result
     except Exception as exc:
         error_result = fallback_response(query, str(exc))
-        job_store.update(job_id, status="failed", result=error_result, error=str(exc))
+        job_store.update(job_id, status="failed", progress=100, stage="failed", result=error_result, error=str(exc))
         print(f"[analysis] hypothesis_job_failed job_id={job_id} elapsed={perf_counter() - start_time:.2f}s error={exc!r}")
         return error_result
 
@@ -236,6 +246,8 @@ def get_job_result(job_id: str):
     return {
         "job_id": job.id,
         "status": job.status,
+        "progress": job.progress,
+        "stage": job.stage,
         "query": job.query,
         "result": job.result,
         "error": job.error,

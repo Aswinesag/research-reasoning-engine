@@ -91,6 +91,8 @@ export interface ResearchRequest {
 export interface AnalysisJobResponse {
   job_id: string
   status: 'processing' | 'complete' | 'failed'
+  progress?: number
+  stage?: string
   result?: ResearchResult
   overview?: {
     total_edges: number

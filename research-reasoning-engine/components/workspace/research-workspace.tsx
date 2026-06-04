@@ -17,6 +17,8 @@ import { useResearchStore } from '@/store/research-store'
 export function ResearchWorkspace() {
   const { currentJobId, analysisStatus, setResult, setAnalysisStatus } = useResearchStore()
   const jobQuery = useResearchResult(currentJobId ?? '')
+  const jobProgress = jobQuery.data?.progress ?? (analysisStatus === 'processing' ? 0 : 100)
+  const jobStage = jobQuery.data?.stage ?? analysisStatus
 
   useEffect(() => {
     if (!jobQuery.data) return
@@ -44,7 +46,11 @@ export function ResearchWorkspace() {
 
       <div className="space-y-6">
         <QueryBar />
-        <ReasoningPipeline active={analysisStatus === 'processing' || jobQuery.isFetching} />
+        <ReasoningPipeline
+          active={analysisStatus === 'processing' || jobQuery.isFetching}
+          progress={jobProgress}
+          stage={jobStage}
+        />
         <div className="grid gap-6 xl:grid-cols-[.95fr_1.05fr]">
           <HypothesisPanel />
           <ReasoningGraph />
@@ -67,4 +73,3 @@ export function ResearchWorkspace() {
     </WorkspaceShell>
   )
 }
-
