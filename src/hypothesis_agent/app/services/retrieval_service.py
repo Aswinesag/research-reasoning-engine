@@ -3,6 +3,7 @@ import numpy as np
 import json
 import os
 from functools import lru_cache
+from pathlib import Path
 from hypothesis_agent.core.models import EvidenceSnippet
 
 
@@ -17,17 +18,29 @@ class RetrievalService:
     def __init__(self):
         self._model = None
 
-        # Get project root (go up from src/hypothesis_agent/app/services)
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
-        
-        # Load FAISS index
-        index_path = os.path.join(project_root, "data", "index", "faiss.index")
-        self.index = faiss.read_index(index_path)
+        project_root = Path(__file__).resolve().parents[4]
 
-        # Load metadata JSON
-        metadata_path = os.path.join(project_root, "data", "index", "metadata.json")
-        with open(metadata_path, "r", encoding="utf-8") as f:
-            self.metadata = json.load(f)
+        index_candidates = [
+            project_root / "data" / "index" / "faiss.index",
+            project_root / "data" / "processed" / "index.faiss",
+        ]
+        metadata_candidates = [
+            project_root / "data" / "index" / "metadata.json",
+            project_root / "data" / "processed" / "metadata.json",
+        ]
+
+        index_path = next((path for path in index_candidates if path.exists()), None)
+        if index_path is None:
+            raise FileNotFoundError("No FAISS index found in data/index or data/processed")
+
+        metadata_path = next((path for path in metadata_candidates if path.exists()), None)
+        if metadata_path is None:
+            raise FileNotFoundError("No metadata.json found in data/index or data/processed")
+
+        self.index = faiss.read_index(str(index_path))
+
+        with metadata_path.open("r", encoding="utf-8") as file:
+            self.metadata = json.load(file)
 
         print(f"FAISS index loaded with {self.index.ntotal} vectors.")
         print(f"Metadata entries loaded: {len(self.metadata)}")
