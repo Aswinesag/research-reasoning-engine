@@ -1,6 +1,10 @@
-﻿import axios from 'axios'
+import axios from 'axios'
 import { mockResearchResult } from '@/lib/mock-data'
-import { ResearchRequest, ResearchResult } from '@/types/research'
+import {
+  AnalysisJobResponse,
+  ResearchRequest,
+  ResearchResult,
+} from '@/types/research'
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000',
@@ -40,7 +44,10 @@ function normalizeBackendResult(data: any, request: ResearchRequest): ResearchRe
   }))
 
   const chains = data?.hypothesis?.supporting_chains ?? []
-  const confidence = Number(data?.overview?.confidence ?? 0) > 1 ? Number(data?.overview?.confidence ?? 0) / 100 : Number(data?.overview?.confidence ?? 0.5)
+  const confidence =
+    Number(data?.overview?.confidence ?? 0) > 1
+      ? Number(data?.overview?.confidence ?? 0) / 100
+      : Number(data?.overview?.confidence ?? 0.5)
 
   return {
     id: `session-${Date.now()}`,
@@ -50,9 +57,12 @@ function normalizeBackendResult(data: any, request: ResearchRequest): ResearchRe
     hypothesis: {
       title: 'Evidence-backed reasoning hypothesis',
       mechanism: String(data?.hypothesis?.mechanism ?? 'No mechanism returned.'),
-      inference: chains.length ? `Strongest chain: ${chains[0].join(' -> ')}` : 'No supporting chain was returned by the backend.',
+      inference: chains.length
+        ? `Strongest chain: ${chains[0].join(' -> ')}`
+        : 'No supporting chain was returned by the backend.',
       conclusion: String(data?.hypothesis?.mechanism ?? 'Insufficient structured evidence retrieved.'),
-      falsifiability: 'Test the strongest extracted relation with targeted intervention and disconfirming evidence checks.',
+      falsifiability:
+        'Test the strongest extracted relation with targeted intervention and disconfirming evidence checks.',
       confidence,
       simplified: String(data?.hypothesis?.mechanism ?? 'The system found limited evidence for this question.'),
     },
@@ -65,7 +75,9 @@ function normalizeBackendResult(data: any, request: ResearchRequest): ResearchRe
       totalNodes: graphNodes.length,
       totalEdges: graphEdges.length,
       conflicts: Number(data?.overview?.conflicts ?? 0),
-      evidenceUsage: evidence.length ? evidence.filter((item: any) => item.type === 'evidence').length / evidence.length : 0,
+      evidenceUsage: evidence.length
+        ? evidence.filter((item: any) => item.type === 'evidence').length / evidence.length
+        : 0,
       reasoningDepth: Math.max(...chains.map((chain: string[]) => chain.length), 1),
     },
     conflicts: (data?.hypothesis?.conflicts ?? []).map((conflict: string, index: number) => ({
@@ -86,27 +98,14 @@ function normalizeBackendResult(data: any, request: ResearchRequest): ResearchRe
   }
 }
 
-export async function runResearch(request: ResearchRequest): Promise<ResearchResult> {
-  try {
-    const { data } = await api.post('/analyze', { query: request.query })
-    return normalizeBackendResult(data, request)
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
-      throw new Error('The backend took longer than 120 seconds to respond.')
-    }
-    if (process.env.NODE_ENV === 'production') throw error
-    return { ...mockResearchResult, query: request.query, domain: request.domain }
-  }
+export async function runResearch(request: ResearchRequest): Promise<AnalysisJobResponse> {
+  const { data } = await api.post('/analyze', { query: request.query })
+  return data
 }
 
-export async function getResearchResult(id: string): Promise<ResearchResult> {
-  try {
-    const { data } = await api.get(`/research/results/${id}`)
-    return data
-  } catch (error) {
-    if (process.env.NODE_ENV === 'production') throw error
-    return { ...mockResearchResult, id }
-  }
+export async function getResearchResult(id: string): Promise<AnalysisJobResponse> {
+  const { data } = await api.get(`/results/${id}`)
+  return data
 }
 
 export async function getSystemMetrics() {
@@ -123,3 +122,12 @@ export async function getSystemMetrics() {
     }
   }
 }
+
+export function toResearchResult(response: AnalysisJobResponse, request: ResearchRequest): ResearchResult {
+  if (response.result?.hypothesis?.title && response.result?.graphNodes) {
+    return response.result as ResearchResult
+  }
+
+  return normalizeBackendResult(response, request)
+}
+

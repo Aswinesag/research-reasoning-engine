@@ -1,9 +1,14 @@
 from fastapi import FastAPI
+from fastapi import BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
 from hypothesis_agent.app.schemas import QueryRequest
-from hypothesis_agent.app.services.analysis_service import run_analysis_pipeline
+from hypothesis_agent.app.services.analysis_service import (
+    build_fast_analysis,
+    complete_analysis,
+    get_job_result,
+)
 
 app = FastAPI(title="Research Reasoning Engine API")
 
@@ -23,6 +28,17 @@ app.add_middleware(
 
 
 @app.post("/analyze")
-async def analyze(request: QueryRequest):
-    result = run_analysis_pipeline(request.query)
+async def analyze(request: QueryRequest, background_tasks: BackgroundTasks):
+    result = build_fast_analysis(request.query)
+    job_id = result.get("job_id")
+    if job_id:
+        background_tasks.add_task(complete_analysis, request.query, job_id)
+    return result
+
+
+@app.get("/results/{job_id}")
+async def get_result(job_id: str):
+    result = get_job_result(job_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Job not found")
     return result

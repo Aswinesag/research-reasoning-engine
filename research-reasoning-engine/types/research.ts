@@ -88,3 +88,23 @@ export interface ResearchRequest {
   simplified: boolean
 }
 
+export interface AnalysisJobResponse {
+  job_id: string
+  status: 'processing' | 'complete' | 'failed'
+  result?: ResearchResult
+  overview?: {
+    total_edges: number
+    conflicts: number
+    confidence: number
+    strongest_chain: string[]
+  }
+  evidence?: EvidenceSnippet[]
+  graph?: {
+    nodes: ReasoningNode[]
+    edges: ReasoningEdge[]
+  }
+  hypothesis?: Hypothesis
+  metrics?: Metrics
+  error?: string
+}
+

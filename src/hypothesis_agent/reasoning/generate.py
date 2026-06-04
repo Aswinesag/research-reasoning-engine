@@ -13,6 +13,7 @@ load_dotenv(override=True)
 
 MODEL_NAME = "llama-3.1-8b-instant"
 TEMPERATURE = 0.3
+GROQ_TIMEOUT_SECONDS = 20.0
 
 
 class HypothesisGenerator:
@@ -23,7 +24,21 @@ class HypothesisGenerator:
         if not api_key or api_key == "your_api_key":
             raise ValueError("Valid GROQ_API_KEY not set")
 
-        self.client = Groq(api_key=api_key)
+        self.client = Groq(
+            api_key=api_key,
+            timeout=GROQ_TIMEOUT_SECONDS,
+            max_retries=0,
+        )
+
+    def _call_groq(self, prompt: str, temperature: float):
+        try:
+            return self.client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=temperature,
+            )
+        except Exception as exc:
+            raise TimeoutError(f"Groq request failed or timed out after {GROQ_TIMEOUT_SECONDS}s") from exc
 
     # ===================================================
     # 1️⃣ STRICT RELATION EXTRACTION
@@ -31,40 +46,14 @@ class HypothesisGenerator:
 
     def extract_relations(self, text: str):
 
-        prompt = f"""
-You are a biomedical information extraction system.
-
-Extract ONLY explicitly stated DIRECTED causal biological relationships.
-
-Return STRICT JSON ONLY.
-No markdown.
-No explanation.
-No extra text.
-
-Format:
-[
-  {{
-    "source": "entity A",
-    "target": "entity B",
-    "polarity": "+"
-  }}
-]
-
-Polarity:
-+ = activation / increase
-- = inhibition / decrease
-
-If no causal relationship exists, return [].
-
-Text:
-{text}
-"""
-
-        response = self.client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,  # deterministic extraction
+        prompt = (
+            "Extract only explicit directed causal biological relations from the text. "
+            "Return strict JSON array only with objects: {source, target, polarity}. "
+            "Polarity must be '+' or '-'. Return [] if none. "
+            f"Text: {text}"
         )
+
+        response = self._call_groq(prompt, temperature=0.0)
 
         content = response.choices[0].message.content.strip()
 
@@ -191,37 +180,17 @@ Text:
             set([e.source for e in edges] + [e.target for e in edges])
         )
 
-        prompt = f"""
-You are a mechanistic biomedical reasoning engine.
-
-You MUST ONLY use the entities listed below.
-You are NOT allowed to introduce new biological concepts.
-
-Allowed Entities:
-{entity_set}
-
-Causal Edges:
-{edge_text}
-
-Detected Causal Chains:
-{chain_text}
-
-Conflicts:
-{conflicts}
-
-Generate a research-grade hypothesis that:
-- Integrates multiple causal chains
-- Explains indirect mechanisms
-- Accounts for conflicts explicitly
-- Separates evidence from inference
-- Is falsifiable and testable
-"""
-
-        response = self.client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=TEMPERATURE,
+        prompt = (
+            "Generate a concise research hypothesis using only the allowed entities. "
+            "Use the causal edges, chains, and conflicts as grounding. "
+            "Keep the answer direct and testable.\n"
+            f"Allowed entities: {entity_set}\n"
+            f"Causal edges: {edge_text}\n"
+            f"Chains: {chain_text}\n"
+            f"Conflicts: {conflicts}"
         )
+
+        response = self._call_groq(prompt, temperature=TEMPERATURE)
 
         return response.choices[0].message.content, conflicts
 
