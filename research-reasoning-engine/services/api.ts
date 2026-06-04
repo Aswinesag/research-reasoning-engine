@@ -4,7 +4,7 @@ import { ResearchRequest, ResearchResult } from '@/types/research'
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000',
-  timeout: 20_000,
+  timeout: 120_000,
 })
 
 function normalizeBackendResult(data: any, request: ResearchRequest): ResearchResult {
@@ -91,6 +91,9 @@ export async function runResearch(request: ResearchRequest): Promise<ResearchRes
     const { data } = await api.post('/analyze', { query: request.query })
     return normalizeBackendResult(data, request)
   } catch (error) {
+    if (axios.isAxiosError(error) && error.code === 'ECONNABORTED') {
+      throw new Error('The backend took longer than 120 seconds to respond.')
+    }
     if (process.env.NODE_ENV === 'production') throw error
     return { ...mockResearchResult, query: request.query, domain: request.domain }
   }
