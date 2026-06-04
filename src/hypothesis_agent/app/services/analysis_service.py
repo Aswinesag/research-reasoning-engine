@@ -47,46 +47,14 @@ def build_fast_analysis(query: str):
         response["job_id"] = None
         return response
 
-    job_store.update(job.id, progress=35, stage="building causal graph")
-
-    graph = generator.build_graph(snippets)
-    edges = graph.get_edges()
-    chains = graph.find_chains(depth=3)
-    conflicts = graph.detect_conflicts()
-    confidence = generator.compute_confidence(graph, conflicts)
-
-    job_store.update(job.id, progress=70, stage="assembling evidence")
-
-    nodes_dict = {}
-    for edge in edges:
-        nodes_dict.setdefault(edge.source, 0)
-        nodes_dict.setdefault(edge.target, 0)
-        nodes_dict[edge.source] += 1
-        nodes_dict[edge.target] += 1
-
-    nodes = [
-        {"id": name, "label": name, "frequency": frequency}
-        for name, frequency in nodes_dict.items()
-    ]
-
-    graph_edges = [
-        {
-            "id": f"{index}",
-            "source": edge.source,
-            "target": edge.target,
-            "polarity": edge.polarity,
-            "weight": edge.weight,
-            "conflict": False,
-        }
-        for index, edge in enumerate(edges)
-    ]
+    job_store.update(job.id, progress=25, stage="assembling evidence")
 
     evidence_items = []
+    nodes_map = {}
     for snippet in snippets:
         snippet_entities = extract_entities(snippet.text)
-        relations_count = sum(
-            1 for edge in edges if edge.source in snippet_entities or edge.target in snippet_entities
-        )
+        for entity in snippet_entities:
+            nodes_map[entity] = nodes_map.get(entity, 0) + 1
         evidence_items.append(
             {
                 "id": snippet.id,
@@ -94,42 +62,45 @@ def build_fast_analysis(query: str):
                 "score": snippet.score,
                 "excerpt": snippet.text[:300],
                 "entities": snippet_entities,
-                "relations_count": relations_count,
+                "relations_count": 0,
                 "used": True,
                 "conflict": False,
             }
         )
 
-    mean_weight = np.mean([edge.weight for edge in edges]) if edges else 0
-    reinforcement_factor = min(len(edges) / 5, 1.0)
-    graph_density = len(edges) / max(len(nodes), 1)
+    nodes = [
+        {"id": name, "label": name, "frequency": frequency}
+        for name, frequency in nodes_map.items()
+    ]
+
+    confidence = max(10, min(45, int(sum(snippet.score for snippet in snippets) / len(snippets) * 50)))
 
     return {
         "status": "processing",
         "job_id": job.id,
-        "progress": 70,
-        "stage": "assembling evidence",
+        "progress": 25,
+        "stage": "queued hypothesis generation",
         "overview": {
-            "total_edges": len(edges),
-            "conflicts": len(conflicts),
+            "total_edges": 0,
+            "conflicts": 0,
             "confidence": confidence,
-            "strongest_chain": chains[0] if chains else [],
+            "strongest_chain": [],
         },
         "evidence": evidence_items,
         "graph": {
             "nodes": nodes,
-            "edges": graph_edges,
+            "edges": [],
         },
         "hypothesis": {
             "mechanism": "Hypothesis generation in progress.",
-            "supporting_chains": chains[:3],
-            "conflicts": conflicts,
+            "supporting_chains": [],
+            "conflicts": [],
             "testable_predictions": [],
         },
         "metrics": {
-            "mean_weight": round(float(mean_weight), 3),
-            "reinforcement_factor": reinforcement_factor,
-            "graph_density": round(graph_density, 3),
+            "mean_weight": 0,
+            "reinforcement_factor": 0,
+            "graph_density": 0,
             "new_metric": 0.5,
         },
     }
