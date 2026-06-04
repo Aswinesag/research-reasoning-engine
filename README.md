@@ -204,16 +204,9 @@ Backend web service:
 PYTHONPATH=src uvicorn hypothesis_agent.app.main:app --host 0.0.0.0 --port $PORT
 ```
 
-Backend worker service:
-
-```bash
-PYTHONPATH=src python -m hypothesis_agent.app.worker
-```
-
 Required environment variables:
 
 ```bash
-REDIS_URL=redis://...
 FRONTEND_ORIGIN=https://research-reasoning-engine.vercel.app
 GROQ_API_KEY=...
 ```

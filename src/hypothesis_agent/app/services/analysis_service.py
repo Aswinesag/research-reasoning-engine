@@ -1,15 +1,10 @@
 from functools import lru_cache
+from statistics import mean
 from time import perf_counter
 import re
 
-import numpy as np
-
 from hypothesis_agent.app.services.job_store import job_store
 from hypothesis_agent.app.services.retrieval_service import retrieval_service
-from hypothesis_agent.reasoning.generate import HypothesisGenerator
-
-
-generator = HypothesisGenerator()
 
 
 @lru_cache(maxsize=512)
@@ -42,17 +37,18 @@ def build_fast_analysis(query: str):
     print(f"[analysis] retrieval_complete elapsed={perf_counter() - start_time:.2f}s snippets={len(snippets)}")
 
     if len(snippets) < 2:
-        response = empty_response()
-        response["status"] = "complete"
-        response["job_id"] = None
+        response = complete_response(query, job.id, snippets, [], [], [], [])
+        job_store.update(job.id, status="complete", progress=100, stage="complete", result=response)
         return response
 
     job_store.update(job.id, progress=25, stage="assembling evidence")
 
     evidence_items = []
     nodes_map = {}
+    entities_by_snippet = []
     for snippet in snippets:
         snippet_entities = extract_entities(snippet.text)
+        entities_by_snippet.append(snippet_entities)
         for entity in snippet_entities:
             nodes_map[entity] = nodes_map.get(entity, 0) + 1
         evidence_items.append(
@@ -72,142 +68,133 @@ def build_fast_analysis(query: str):
         {"id": name, "label": name, "frequency": frequency}
         for name, frequency in nodes_map.items()
     ]
+    edges = build_edges(snippets, entities_by_snippet)
+    chains = build_chains(edges)
+    conflicts = []
+    confidence = confidence_from_snippets(snippets, len(edges))
+    hypothesis_text = summarize_query(query, nodes, snippets)
+    mean_weight = mean([edge["weight"] for edge in edges]) if edges else 0
+    result = complete_response(
+        query=query,
+        job_id=job.id,
+        snippets=snippets,
+        evidence_items=evidence_items,
+        nodes=nodes,
+        edges=edges,
+        chains=chains,
+        conflicts=conflicts,
+        hypothesis_text=hypothesis_text,
+        confidence=confidence,
+        mean_weight=mean_weight,
+    )
 
-    confidence = max(10, min(45, int(sum(snippet.score for snippet in snippets) / len(snippets) * 50)))
+    job_store.update(job.id, status="complete", progress=100, stage="complete", result=result)
+    print(f"[analysis] fast_complete job_id={job.id} elapsed={perf_counter() - start_time:.2f}s")
+    return result
 
+
+def build_edges(snippets, entities_by_snippet):
+    edges = []
+    seen = set()
+    for index, snippet in enumerate(snippets):
+        entities = entities_by_snippet[index]
+        for source, target in zip(entities, entities[1:]):
+            key = (source, target)
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append(
+                {
+                    "id": f"{len(edges)}",
+                    "source": source,
+                    "target": target,
+                    "polarity": "supports",
+                    "weight": round(min(1.0, max(0.2, snippet.score)), 3),
+                    "conflict": False,
+                }
+            )
+    return edges[:8]
+
+
+def build_chains(edges):
+    if not edges:
+        return []
+    chain = []
+    for edge in edges[:4]:
+        chain.append(f"{edge['source']} → {edge['target']}")
+    return [chain]
+
+
+def confidence_from_snippets(snippets, edge_count):
+    average_score = mean([snippet.score for snippet in snippets]) if snippets else 0
+    base = int(average_score * 60) + edge_count * 4
+    return max(10, min(85, base))
+
+
+def summarize_query(query, nodes, snippets):
+    if not nodes:
+        return "Insufficient structured evidence retrieved."
+    lead = nodes[0]["id"]
+    secondary = nodes[1]["id"] if len(nodes) > 1 else "the retrieved evidence"
+    snippet_hint = snippets[0].text[:140].rstrip()
+    return (
+        f"The evidence suggests {lead} may influence {secondary} in the context of {query.lower()}. "
+        f"The strongest retrieved snippet indicates: {snippet_hint}"
+    )
+
+
+def complete_response(
+    query,
+    job_id,
+    snippets,
+    evidence_items,
+    nodes,
+    edges,
+    chains,
+    conflicts,
+    hypothesis_text,
+    confidence,
+    mean_weight,
+):
     return {
-        "status": "processing",
-        "job_id": job.id,
-        "progress": 25,
-        "stage": "queued hypothesis generation",
+        "status": "complete",
+        "job_id": job_id,
+        "progress": 100,
+        "stage": "complete",
         "overview": {
-            "total_edges": 0,
-            "conflicts": 0,
+            "total_edges": len(edges),
+            "conflicts": len(conflicts),
             "confidence": confidence,
-            "strongest_chain": [],
+            "strongest_chain": chains[0] if chains else [],
         },
         "evidence": evidence_items,
         "graph": {
             "nodes": nodes,
-            "edges": [],
+            "edges": edges,
         },
         "hypothesis": {
-            "mechanism": "Hypothesis generation in progress.",
-            "supporting_chains": [],
-            "conflicts": [],
-            "testable_predictions": [],
+            "mechanism": hypothesis_text,
+            "supporting_chains": chains[:3],
+            "conflicts": conflicts,
+            "testable_predictions": build_predictions(query, nodes),
         },
         "metrics": {
-            "mean_weight": 0,
-            "reinforcement_factor": 0,
-            "graph_density": 0,
+            "mean_weight": round(float(mean_weight), 3),
+            "reinforcement_factor": min(len(edges) / 5, 1.0),
+            "graph_density": round(len(edges) / max(len(nodes), 1), 3),
             "new_metric": 0.5,
         },
     }
 
 
-def complete_analysis(query: str, job_id: str):
-    start_time = perf_counter()
-    print(f"[analysis] hypothesis_job_start job_id={job_id} query={query!r}")
-
-    try:
-        job_store.update(job_id, status="processing", progress=75, stage="generating hypothesis")
-        snippets = retrieval_service.search(query, top_k=3)
-        if len(snippets) < 2:
-            result = empty_response()
-        else:
-            graph = generator.build_graph(snippets)
-            job_store.update(job_id, progress=85, stage="evaluating conflicts")
-            hypothesis_text, conflicts = generator.generate_from_graph(graph)
-            confidence = generator.compute_confidence(graph, conflicts)
-            edges = graph.get_edges()
-            chains = graph.find_chains(depth=3)
-
-            nodes_dict = {}
-            for edge in edges:
-                nodes_dict.setdefault(edge.source, 0)
-                nodes_dict.setdefault(edge.target, 0)
-                nodes_dict[edge.source] += 1
-                nodes_dict[edge.target] += 1
-
-            nodes = [
-                {"id": name, "label": name, "frequency": frequency}
-                for name, frequency in nodes_dict.items()
-            ]
-
-            graph_edges = [
-                {
-                    "id": f"{index}",
-                    "source": edge.source,
-                    "target": edge.target,
-                    "polarity": edge.polarity,
-                    "weight": edge.weight,
-                    "conflict": False,
-                }
-                for index, edge in enumerate(edges)
-            ]
-
-            evidence_items = []
-            for snippet in snippets:
-                snippet_entities = extract_entities(snippet.text)
-                relations_count = sum(
-                    1 for edge in edges if edge.source in snippet_entities or edge.target in snippet_entities
-                )
-                evidence_items.append(
-                    {
-                        "id": snippet.id,
-                        "doc_id": snippet.doc_id,
-                        "score": snippet.score,
-                        "excerpt": snippet.text[:300],
-                        "entities": snippet_entities,
-                        "relations_count": relations_count,
-                        "used": True,
-                        "conflict": False,
-                    }
-                )
-
-            mean_weight = np.mean([edge.weight for edge in edges]) if edges else 0
-            reinforcement_factor = min(len(edges) / 5, 1.0)
-            graph_density = len(edges) / max(len(nodes), 1)
-
-            result = {
-                "status": "complete",
-                "job_id": job_id,
-                "progress": 100,
-                "stage": "complete",
-                "overview": {
-                    "total_edges": len(edges),
-                    "conflicts": len(conflicts),
-                    "confidence": confidence,
-                    "strongest_chain": chains[0] if chains else [],
-                },
-                "evidence": evidence_items,
-                "graph": {
-                    "nodes": nodes,
-                    "edges": graph_edges,
-                },
-                "hypothesis": {
-                    "mechanism": hypothesis_text,
-                    "supporting_chains": chains[:3],
-                    "conflicts": conflicts,
-                    "testable_predictions": [],
-                },
-                "metrics": {
-                    "mean_weight": round(float(mean_weight), 3),
-                    "reinforcement_factor": reinforcement_factor,
-                    "graph_density": round(graph_density, 3),
-                    "new_metric": 0.5,
-                },
-            }
-
-        job_store.update(job_id, status="complete", result=result)
-        print(f"[analysis] hypothesis_job_complete job_id={job_id} elapsed={perf_counter() - start_time:.2f}s")
-        return result
-    except Exception as exc:
-        error_result = fallback_response(query, str(exc))
-        job_store.update(job_id, status="failed", progress=100, stage="failed", result=error_result, error=str(exc))
-        print(f"[analysis] hypothesis_job_failed job_id={job_id} elapsed={perf_counter() - start_time:.2f}s error={exc!r}")
-        return error_result
+def build_predictions(query, nodes):
+    if not nodes:
+        return []
+    anchor = nodes[0]["id"]
+    return [
+        f"If {anchor} is central to the query, perturbing it should alter the downstream response described by {query.lower()}.",
+        f"Independent validation should find the strongest effect near {anchor} rather than distant nodes.",
+    ]
 
 
 def get_job_result(job_id: str):
@@ -224,56 +211,4 @@ def get_job_result(job_id: str):
         "error": job.error,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
-    }
-
-
-def empty_response():
-    return {
-        "overview": {
-            "total_edges": 0,
-            "conflicts": 0,
-            "confidence": 0,
-            "strongest_chain": [],
-        },
-        "evidence": [],
-        "graph": {"nodes": [], "edges": []},
-        "hypothesis": {
-            "mechanism": "Insufficient structured evidence retrieved.",
-            "supporting_chains": [],
-            "conflicts": [],
-            "testable_predictions": [],
-        },
-        "metrics": {
-            "mean_weight": 0,
-            "reinforcement_factor": 0,
-            "graph_density": 0,
-        },
-    }
-
-
-def fallback_response(query: str, error_message: str):
-    return {
-        "overview": {
-            "total_edges": 0,
-            "conflicts": 0,
-            "confidence": 0,
-            "strongest_chain": [],
-        },
-        "evidence": [],
-        "graph": {"nodes": [], "edges": []},
-        "hypothesis": {
-            "mechanism": "The backend could not complete the full reasoning pass for this query.",
-            "supporting_chains": [],
-            "conflicts": [],
-            "testable_predictions": [],
-        },
-        "metrics": {
-            "mean_weight": 0,
-            "reinforcement_factor": 0,
-            "graph_density": 0,
-        },
-        "debug": {
-            "query": query,
-            "error": error_message,
-        },
     }

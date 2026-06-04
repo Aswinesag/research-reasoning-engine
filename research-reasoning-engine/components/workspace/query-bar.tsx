@@ -29,14 +29,10 @@ export function QueryBar() {
   async function submit(event: FormEvent) {
     event.preventDefault()
     setAnalysisStatus('processing')
+    setCurrentJobId(undefined)
     const response = await mutation.mutateAsync({ query: activeQuery, domain, depth, simplified: viewMode === 'simplified' })
-    if (response.job_id) {
+    if (response.status === 'processing' && response.job_id) {
       setCurrentJobId(response.job_id)
-    }
-    if (response.result) {
-      setResult(response.result)
-      setAnalysisStatus(response.status === 'failed' ? 'failed' : 'complete')
-      return
     }
     setResult(toResearchResult(response, { query: activeQuery, domain, depth, simplified: viewMode === 'simplified' }))
     setAnalysisStatus(response.status)

@@ -8,7 +8,6 @@ from hypothesis_agent.app.services.analysis_service import (
     build_fast_analysis,
     get_job_result,
 )
-from hypothesis_agent.app.services.job_store import job_store
 
 app = FastAPI(title="Research Reasoning Engine API")
 
@@ -29,11 +28,7 @@ app.add_middleware(
 
 @app.post("/analyze")
 async def analyze(request: QueryRequest):
-    result = build_fast_analysis(request.query)
-    job_id = result.get("job_id")
-    if job_id:
-        job_store.enqueue(job_id)
-    return result
+    return build_fast_analysis(request.query)
 
 
 @app.get("/results/{job_id}")

@@ -1,0 +1,11 @@
+.git
+.next
+node_modules
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.venv
+research-reasoning-engine/node_modules
+research-reasoning-engine/.next
+research-reasoning-engine/.git
