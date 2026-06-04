@@ -5,3 +5,7 @@ pydantic
 numpy
 groq
 faiss-cpu
+sentence-transformers
+scikit-learn
+biopython
+rank-bm25
