@@ -193,3 +193,27 @@ The system performs structured reasoning under constraints.
 - Speculative reasoning remains probabilistic
 
 Grounding constraints reduce hallucination but do not eliminate uncertainty.
+
+---
+
+## Production Run
+
+Backend web service:
+
+```bash
+PYTHONPATH=src uvicorn hypothesis_agent.app.main:app --host 0.0.0.0 --port $PORT
+```
+
+Backend worker service:
+
+```bash
+PYTHONPATH=src python -m hypothesis_agent.app.worker
+```
+
+Required environment variables:
+
+```bash
+REDIS_URL=redis://...
+FRONTEND_ORIGIN=https://research-reasoning-engine.vercel.app
+GROQ_API_KEY=...
+```

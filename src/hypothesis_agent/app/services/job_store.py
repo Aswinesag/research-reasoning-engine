@@ -9,6 +9,8 @@ import redis
 
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+JOB_QUEUE_KEY = "analysis_job_queue"
+JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "86400"))
 
 
 @dataclass
@@ -61,7 +63,18 @@ class JobStore:
     def create(self, query: str) -> AnalysisJob:
         job = AnalysisJob(id=str(uuid4()), query=query)
         self._redis.hset(self._key(job.id), mapping=self._serialize(job))
+        self._redis.expire(self._key(job.id), JOB_TTL_SECONDS)
         return job
+
+    def enqueue(self, job_id: str) -> None:
+        self._redis.rpush(JOB_QUEUE_KEY, job_id)
+
+    def dequeue(self, timeout: int = 5) -> Optional[str]:
+        item = self._redis.blpop(JOB_QUEUE_KEY, timeout=timeout)
+        if item is None:
+            return None
+        _, job_id = item
+        return job_id
 
     def get(self, job_id: str) -> Optional[AnalysisJob]:
         payload = self._redis.hgetall(self._key(job_id))
@@ -96,7 +109,7 @@ class JobStore:
 
         job.updated_at = time()
         self._redis.hset(self._key(job.id), mapping=self._serialize(job))
+        self._redis.expire(self._key(job.id), JOB_TTL_SECONDS)
         return job
-
 
 job_store = JobStore()

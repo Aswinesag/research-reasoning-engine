@@ -42,6 +42,13 @@ export function ResearchWorkspace() {
           </div>
           <h1 className="mt-2 text-3xl font-semibold text-white">Structured reasoning over evidence</h1>
         </div>
+        {currentJobId ? (
+          <div className="rounded-2xl border border-cyan-300/15 bg-cyan-300/10 px-4 py-2 text-right text-xs text-cyan-100">
+            <div className="font-medium uppercase tracking-widest">Job</div>
+            <div>{jobStage}</div>
+            <div>{jobProgress}%</div>
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-6">
